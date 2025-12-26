@@ -1,0 +1,98 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build pmic_2512",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "west",
+                "build",
+                "-b",
+                "nrf5340dk/nrf5340/cpuapp",
+                "${workspaceFolder}",
+                "--build-dir",
+                "${workspaceFolder}/build",
+                "--no-sysbuild"
+            ],
+            "options": {
+                "cwd": "C:/ncs/v3.1.0",
+                "env": {
+                    "PATH": "C:/ncs/toolchains/c1a76fddb2/bin;C:/ncs/toolchains/c1a76fddb2/opt/bin;C:/ncs/toolchains/c1a76fddb2/mingw64/bin;C:/ncs/toolchains/c1a76fddb2/usr/bin;${env:PATH}",
+                    "ZEPHYR_BASE": "C:/ncs/v3.1.0/zephyr"
+                },
+                "shell": {
+                    "executable": "C:/ncs/toolchains/c1a76fddb2/opt/bin/python.exe"
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Flash pmic_2512",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "west",
+                "flash",
+                "--build-dir",
+                "${workspaceFolder}/build"
+            ],
+            "options": {
+                "cwd": "C:/ncs/v3.1.0",
+                "env": {
+                    "PATH": "C:/ncs/toolchains/c1a76fddb2/bin;C:/ncs/toolchains/c1a76fddb2/opt/bin;C:/ncs/toolchains/c1a76fddb2/mingw64/bin;C:/ncs/toolchains/c1a76fddb2/usr/bin;${env:PATH}",
+                    "ZEPHYR_BASE": "C:/ncs/v3.1.0/zephyr"
+                },
+                "shell": {
+                    "executable": "C:/ncs/toolchains/c1a76fddb2/opt/bin/python.exe"
+                }
+            },
+            "dependsOn": [],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Clean pmic_2512",
+            "type": "shell",
+            "command": "Remove-Item",
+            "args": [
+                "-Path",
+                "${workspaceFolder}/build",
+                "-Recurse",
+                "-Force",
+                "-ErrorAction",
+                "SilentlyContinue"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Build and Flash pmic_2512",
+            "dependsOn": [
+                "Build pmic_2512",
+                "Flash pmic_2512"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        }
+    ]
+}

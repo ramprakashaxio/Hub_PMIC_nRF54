@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "PMIC_2512 Application"
+
+# Include Zephyr's default Kconfig
+rsource "pmic/Kconfig"
+
+source "Kconfig.zephyr"

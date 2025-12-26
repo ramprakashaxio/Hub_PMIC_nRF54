@@ -1,0 +1,97 @@
+/*
+ * nRF5340DK overlay for MAX77658 PMIC
+ *
+ * I2C Pins:
+ *   SDA: P1.11
+ *   SCL: P1.12
+ *
+ * GPIO Pins:
+ *   PMIC_nRST: P1.13 (Active Low Reset)
+ *   PMIC_nIRQ: P0.30 (Active Low Interrupt)
+ *
+ * UART Pins (Debug Console):
+ *   TX: P0.09 (Output)
+ *   RX: P0.08 (Input)
+ */
+
+/* Custom pin control for I2C1 and UART0 */
+&pinctrl {
+    /* I2C1 pins */
+    i2c1_default: i2c1_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 11)>,  /* P1.11 = SDA */
+                    <NRF_PSEL(TWIM_SCL, 1, 12)>;  /* P1.12 = SCL */
+        };
+    };
+
+    i2c1_sleep: i2c1_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 11)>,  /* P1.11 = SDA */
+                    <NRF_PSEL(TWIM_SCL, 1, 12)>;  /* P1.12 = SCL */
+            low-power-enable;
+        };
+    };
+
+    /* UART0 pins for debug console */
+    uart0_default: uart0_default {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 9)>;   /* P0.09 = TX */
+        };
+        group2 {
+            psels = <NRF_PSEL(UART_RX, 0, 8)>;   /* P0.08 = RX */
+            bias-pull-up;
+        };
+    };
+
+    uart0_sleep: uart0_sleep {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 9)>,   /* P0.09 = TX */
+                    <NRF_PSEL(UART_RX, 0, 8)>;   /* P0.08 = RX */
+            low-power-enable;
+        };
+    };
+};
+
+/* Configure I2C1 with custom pins */
+&i2c1 {
+    status = "okay";
+    pinctrl-0 = <&i2c1_default>;
+    pinctrl-1 = <&i2c1_sleep>;
+    pinctrl-names = "default", "sleep";
+    clock-frequency = <I2C_BITRATE_STANDARD>;  /* 100kHz, can use I2C_BITRATE_FAST for 400kHz */
+};
+
+/* Configure UART0 for debug console (115200 baud) */
+&uart0 {
+    status = "okay";
+    current-speed = <115200>;
+    pinctrl-0 = <&uart0_default>;
+    pinctrl-1 = <&uart0_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+/* PMIC GPIO definitions (optional - for future use) */
+/ {
+    pmic_gpios {
+        compatible = "gpio-keys";
+        
+        pmic_nirq: pmic_nirq {
+            gpios = <&gpio0 30 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "PMIC Interrupt";
+        };
+    };
+    
+    pmic_ctrl {
+        compatible = "gpio-leds";
+        
+        pmic_nrst: pmic_nrst {
+            gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+            label = "PMIC Reset";
+        };
+    };
+    
+    aliases {
+        pmic-irq = &pmic_nirq;
+        pmic-rst = &pmic_nrst;
+    };
+};

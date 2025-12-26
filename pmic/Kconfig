@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2021 Maxim Integrated Products, Inc.
+
+menuconfig PMIC_MAX77658
+	bool "MAX77658 PMIC driver support"
+	default y
+	depends on I2C
+	help
+	  Enable MAX77658 Power Management IC driver support.
+	  This includes power management (PM) and fuel gauge (FG) functionality.
+
+if PMIC_MAX77658
+
+config PMIC_MAX77658_LOG_LEVEL
+	int "MAX77658 PMIC Log level"
+	default 3
+	range 0 4
+	help
+	  Sets log level for MAX77658 PMIC driver.
+	  Levels are:
+	  - 0 OFF
+	  - 1 ERROR
+	  - 2 WARNING
+	  - 3 INFO
+	  - 4 DEBUG
+
+config PMIC_MAX77658_INIT_PRIORITY
+	int "MAX77658 initialization priority"
+	default 80
+	help
+	  MAX77658 PMIC initialization priority.
+	  Should be initialized after I2C bus.
+
+config PMIC_MAX77658_PM
+	bool "Enable MAX77658 Power Management functions"
+	default y
+	help
+	  Enable MAX77658 power management functions including
+	  charger, SBB regulators, and LDOs.
+
+config PMIC_MAX77658_FG
+	bool "Enable MAX17055 Fuel Gauge functions"
+	default y
+	help
+	  Enable MAX17055 fuel gauge functions for battery
+	  monitoring (SOC, voltage, current, temperature).
+
+if PMIC_MAX77658_FG
+
+config PMIC_MAX77658_FG_DESIGN_CAP
+	int "Battery design capacity (mAh)"
+	default 350
+	help
+	  Design capacity of the battery in mAh.
+	  This value should match your battery datasheet.
+
+config PMIC_MAX77658_FG_ICHG_TERM
+	hex "Charge termination current register value"
+	default 0x0070
+	help
+	  Charge termination current for the battery.
+	  Refer to MAX17055 datasheet for proper value.
+
+config PMIC_MAX77658_FG_VEMPTY
+	hex "Empty voltage register value"
+	default 0x9600
+	help
+	  Battery empty voltage threshold.
+	  Refer to MAX17055 datasheet for proper value.
+
+config PMIC_MAX77658_FG_RSENSE
+	int "Current sense resistor (mOhm)"
+	default 10
+	help
+	  Value of the current sense resistor in milli-ohms.
+	  Common values: 5, 10, 20 mOhm.
+
+endif # PMIC_MAX77658_FG
+
+endif # PMIC_MAX77658
