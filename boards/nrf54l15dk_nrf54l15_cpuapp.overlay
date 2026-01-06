@@ -1,30 +1,37 @@
 /*
- * nRF5340DK overlay for MAX77658 PMIC
+ * nRF54L15DK overlay for MAX77658 PMIC and MAX32664C Sensor Hub
  *
  * I2C Pins:
  *   SDA: P1.11
  *   SCL: P1.12
  *
- * GPIO Pins:
- *   PMIC_nRST: P1.13 (Active Low Reset)
- *   PMIC_nIRQ: P0.30 (Active Low Interrupt)
+ * MAX32664C Sensor Hub Pins:
+ *   HUB_MFIO: P1.13 (Active Low, Open-Drain)
+ *   HUB_RST:  P0.04 (Active Low Reset)
+ *   OE:       P1.14 (Output Enable)
+ *
+ * PMIC GPIO Pins:
+ *   PMIC_NEN:      P1.07 (Enable, Active High)
+ *   PMIC_nIRQ:     P1.06 (Active Low Interrupt)
+ *   PMIC_nRST:     P1.05 (Active Low Reset)
+ *   PMIC_AMUX_OUT: P1.04 (Analog Mux Output)
  *
  * UART Pins (Debug Console):
- *   TX: P0.09 (Output)
- *   RX: P0.08 (Input)
+ *   TX: P1.03 (Output)
+ *   RX: P1.02 (Input)
  */
 
-/* Custom pin control for I2C1 and UART0 */
+/* Custom pin control for I2C21 and UART20 */
 &pinctrl {
-    /* I2C1 pins */
-    i2c1_default: i2c1_default {
+    /* I2C21 pins */
+    i2c21_default: i2c21_default {
         group1 {
             psels = <NRF_PSEL(TWIM_SDA, 1, 11)>,  /* P1.11 = SDA */
                     <NRF_PSEL(TWIM_SCL, 1, 12)>;  /* P1.12 = SCL */
         };
     };
 
-    i2c1_sleep: i2c1_sleep {
+    i2c21_sleep: i2c21_sleep {
         group1 {
             psels = <NRF_PSEL(TWIM_SDA, 1, 11)>,  /* P1.11 = SDA */
                     <NRF_PSEL(TWIM_SCL, 1, 12)>;  /* P1.12 = SCL */
@@ -32,31 +39,31 @@
         };
     };
 
-    /* UART0 pins for debug console */
-    uart0_default: uart0_default {
+    /* UART20 pins for debug console */
+    uart20_default: uart20_default {
         group1 {
-            psels = <NRF_PSEL(UART_TX, 0, 9)>;   /* P0.09 = TX */
+            psels = <NRF_PSEL(UART_TX, 1, 3)>;   /* P1.03 = TX */
         };
         group2 {
-            psels = <NRF_PSEL(UART_RX, 0, 8)>;   /* P0.08 = RX */
+            psels = <NRF_PSEL(UART_RX, 1, 2)>;   /* P1.02 = RX */
             bias-pull-up;
         };
     };
 
-    uart0_sleep: uart0_sleep {
+    uart20_sleep: uart20_sleep {
         group1 {
-            psels = <NRF_PSEL(UART_TX, 0, 9)>,   /* P0.09 = TX */
-                    <NRF_PSEL(UART_RX, 0, 8)>;   /* P0.08 = RX */
+            psels = <NRF_PSEL(UART_TX, 1, 3)>,   /* P1.03 = TX */
+                    <NRF_PSEL(UART_RX, 1, 2)>;   /* P1.02 = RX */
             low-power-enable;
         };
     };
 };
 
-/* Configure I2C1 with custom pins */
-&i2c1 {
+/* Configure I2C21 with custom pins (nRF54L15 uses i2c21) */
+&i2c21 {
     status = "okay";
-    pinctrl-0 = <&i2c1_default>;
-    pinctrl-1 = <&i2c1_sleep>;
+    pinctrl-0 = <&i2c21_default>;
+    pinctrl-1 = <&i2c21_sleep>;
     pinctrl-names = "default", "sleep";
     clock-frequency = <I2C_BITRATE_STANDARD>;  /* 100kHz, can use I2C_BITRATE_FAST for 400kHz */
 
@@ -65,17 +72,14 @@
         compatible = "maxim,max32664c";
         reg = <0x55>;
         
-        /* If your line is nRST (active-low), keep ACTIVE_LOW */
-        reset-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;   /* P0.00 - HUB_EXT_nRST */
+        /* Reset pin - Active Low */
+        reset-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;   /* P0.04 - HUB_RST */
 
         /* MFIO: Open-drain output with pull-up for interrupt/wake capability */
-        mfio-gpios  = <&gpio1 0 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;   /* P1.00 - HUB_EXT_MFIO */
+        mfio-gpios  = <&gpio1 13 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;   /* P1.13 - HUB_MFIO */
         
-        /* PATCH: Use Standard Maxim Coefficients (Scaled x100,000) */
-        /* A = 1.5958422   -> 159584 */
-        /* B = -34.6596622 -> -3465966 */
-        /* C = 112.6898759 -> 11268987 */
-        spo2-calib = <159584 (-3465966) 11268987>;
+        /* SpO2 calibration coefficients [A, B, C] for equation: SpO2 = A*R^2 + B*R + C */
+        spo2-calib = <1748 6062 10754>;  /* Positive integer values */
         
         /* HR and SpO2 algorithm configuration [avg, sensitivity] */
         hr-config = <4 1>;    /* 4-beat average, sensitivity level 1 */
@@ -104,37 +108,64 @@
     };
 };
 
-/* Configure UART0 for debug console (115200 baud) */
-&uart0 {
+/* Configure UART20 for debug console (115200 baud) */
+&uart20 {
     status = "okay";
     current-speed = <115200>;
-    pinctrl-0 = <&uart0_default>;
-    pinctrl-1 = <&uart0_sleep>;
+    pinctrl-0 = <&uart20_default>;
+    pinctrl-1 = <&uart20_sleep>;
     pinctrl-names = "default", "sleep";
 };
 
-/* PMIC GPIO definitions (optional - for future use) */
+/* GPIO definitions for MAX32664C and PMIC control */
 / {
+    /* MAX32664C control pins */
+    max32664c_gpios {
+        compatible = "gpio-keys";
+        
+        hub_oe: hub_oe {
+            gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+            label = "MAX32664C Output Enable";
+        };
+    };
+    
+    /* PMIC GPIO definitions */
     pmic_gpios {
         compatible = "gpio-keys";
         
         pmic_nirq: pmic_nirq {
-            gpios = <&gpio0 30 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            gpios = <&gpio1 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
             label = "PMIC Interrupt";
+        };
+        
+        pmic_amux: pmic_amux {
+            gpios = <&gpio1 4 GPIO_ACTIVE_HIGH>;
+            label = "PMIC Analog Mux Output";
         };
     };
     
     pmic_ctrl {
         compatible = "gpio-leds";
         
+        pmic_nen: pmic_nen {
+            gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
+            label = "PMIC Enable";
+        };
+        
         pmic_nrst: pmic_nrst {
-            gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+            gpios = <&gpio1 5 GPIO_ACTIVE_LOW>;
             label = "PMIC Reset";
         };
     };
     
     aliases {
+        /* MAX32664C aliases */
+        hub-oe = &hub_oe;
+        
+        /* PMIC aliases */
+        pmic-nen = &pmic_nen;
         pmic-irq = &pmic_nirq;
         pmic-rst = &pmic_nrst;
+        pmic-amux = &pmic_amux;
     };
 };

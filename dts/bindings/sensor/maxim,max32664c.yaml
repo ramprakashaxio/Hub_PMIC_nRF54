@@ -1,0 +1,87 @@
+# dts/bindings/sensor/maxim,max32664c.yaml
+description: Maxim MAX32664C Biometric Sensor Hub
+
+compatible: "maxim,max32664c"
+
+include: i2c-device.yaml
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    required: true
+    description: Reset pin (set polarity via GPIO_ACTIVE_LOW/HIGH)
+
+  mfio-gpios:
+    type: phandle-array
+    required: true
+    description: MFIO pin for Wake/Sleep
+
+  spo2-calib:
+    type: array
+    required: true
+    description: SpO2 calibration coefficients [A, B, C]
+
+  hr-config:
+    type: array
+    required: true
+    description: Heart Rate algo config [avg, sensitivity]
+
+  spo2-config:
+    type: array
+    required: true
+    description: SpO2 algo config [avg, sensitivity]
+
+  use-max86141:
+    type: boolean
+    description: Set if using MAX86141 AFE
+
+  use-max86161:
+    type: boolean
+    description: Set if using MAX86161 AFE
+
+  use-max86174:
+    type: boolean
+    description: Set if using MAX86174 AFE
+
+  motion-time:
+    type: int
+    required: false
+    default: 5000
+    description: Wake on motion time threshold in ms
+
+  motion-threshold:
+    type: int
+    required: false
+    default: 100
+    description: Wake on motion threshold in mg
+
+  min-integration-time:
+    type: string
+    required: false
+    enum: ["14_8us", "29_4us", "58_7us", "117_3us"]  # FW35 codes 0-3
+
+  min-sampling-rate:
+    type: string
+    required: false
+    enum: ["25sps_avg1", "50sps_avg2", "100sps_avg4", "200sps_avg8", "400sps_avg16"]  # FW35 codes 0-4
+
+  max-integration-time:
+    type: string
+    required: false
+    enum: ["14_8us", "29_4us", "58_7us", "117_3us"]  # FW35 codes 0-3
+
+  max-sampling-rate:
+    type: string
+    required: false
+    enum: ["25sps_avg1", "50sps_avg2", "100sps_avg4", "200sps_avg8", "400sps_avg16"]  # FW35 codes 0-4
+
+  report-period:
+    type: int
+    required: false
+    default: 1
+    description: Number of samples per report
+
+  led-current:
+    type: array
+    required: true
+    description: LED currents in mA. Provide 3 entries for MAX86141/MAX86161, or 4 entries for MAX86174 (LED1..LED4).

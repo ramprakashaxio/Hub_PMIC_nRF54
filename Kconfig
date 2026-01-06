@@ -2,7 +2,8 @@
 
 mainmenu "PMIC_2512 Application"
 
-# Include Zephyr's default Kconfig
-rsource "pmic/Kconfig"
+# Include driver Kconfig files
+rsource "driver/pmic/Kconfig"
+rsource "driver/max32664c/Kconfig"
 
 source "Kconfig.zephyr"

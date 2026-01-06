@@ -16,14 +16,16 @@ LOG_MODULE_REGISTER(bsp, CONFIG_LOG_DEFAULT_LEVEL);
 
 /*
  * I2C Device Configuration
- * nRF52840DK uses i2c0, nRF5340DK uses i2c1
+ * nRF52840DK uses i2c0, nRF5340DK uses i2c1, nRF54L15DK uses i2c21
  */
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(i2c1), okay)
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(i2c21), okay)
+#define I2C_NODE DT_NODELABEL(i2c21)
+#elif DT_NODE_HAS_STATUS(DT_NODELABEL(i2c1), okay)
 #define I2C_NODE DT_NODELABEL(i2c1)
 #elif DT_NODE_HAS_STATUS(DT_NODELABEL(i2c0), okay)
 #define I2C_NODE DT_NODELABEL(i2c0)
 #else
-#error "No I2C device found in devicetree (i2c0 or i2c1)"
+#error "No I2C device found in devicetree (i2c0, i2c1, or i2c21)"
 #endif
 
 /* I2C device handle */
