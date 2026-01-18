@@ -12,8 +12,69 @@
 #include "max32664c.h"      /* Driver Header */
 #include "max32664c_main.h" /* Public API Header */
 #include "app_i2c_lock.h"   /* If you use a global I2C lock */
+#include "max77658_main.h"  /* PMIC Software Off API */
 
 LOG_MODULE_REGISTER(max32664c_app, LOG_LEVEL_INF);
+
+/* TODO: Implement User-Selectable Polling Logic
+ * 
+ * Current Implementation: CONTINUOUS MODE ONLY
+ * Future Enhancement: Add STANDBY and PERIODIC modes
+ * 
+ * Flowchart: User-Selectable Polling Logic
+ * 
+ * graph TD
+ *     INIT((Start App Thread)) --> WAIT{Check User Mode}
+ * 
+ *     %% --- BRANCH 1: STANDBY ---
+ *     WAIT -- Mode: STANDBY --> S_SLEEP[Send Sensor Deep Sleep Cmd]
+ *     S_SLEEP --> S_WAIT[Wait Indefinitely<br>for Mode Change Signal]
+ *     S_WAIT --> WAIT
+ * 
+ *     %% --- BRANCH 2: CONTINUOUS MONITORING ---
+ *     WAIT -- Mode: CONTINUOUS --> C_WAKE[Wake Sensor & Apply Mode 0x00]
+ *     C_WAKE --> C_FETCH[Fetch Sample]
+ *     C_FETCH --> C_LOG[Log HR / SpO2]
+ *     C_LOG --> C_CHECK_SIG{Mode Changed?}
+ *     C_CHECK_SIG -- No --> C_DELAY[Sleep 40ms]
+ *     C_DELAY --> C_FETCH
+ *     C_CHECK_SIG -- Yes --> WAIT
+ * 
+ *     %% --- BRANCH 3: PERIODIC (30s, 1m, 5m, 10m) ---
+ *     WAIT -- Mode: PERIODIC --> P_CALC[Calc Interval Seconds]
+ *     P_CALC --> P_WAKE[Wake Sensor <br> MFIO Low 300us]
+ *     P_WAKE --> P_INIT[Apply Algo Mode 0x00<br>Reload Coeffs]
+ *     P_INIT --> P_TIMER[Start Timeout Timer <br> e.g., 30 sec]
+ * 
+ *     %% Periodic Measurement Loop
+ *     P_TIMER --> P_FETCH[Fetch Sample]
+ *     P_FETCH --> P_VALID{Valid Finger &<br>Conf > 90%?}
+ *     
+ *     P_VALID -- Yes --> P_SAVE[<b>Save/Send Data</b>]
+ *     P_SAVE --> P_OFF
+ *     
+ *     P_VALID -- No --> P_TOUT{Timeout Expired?}
+ *     P_TOUT -- No --> P_WAIT_POLL[Sleep 100ms]
+ *     P_WAIT_POLL --> P_FETCH
+ *     P_TOUT -- Yes --> P_LOG_FAIL[Log: No Finger Detected]
+ *     P_LOG_FAIL --> P_OFF
+ * 
+ *     %% Periodic Sleep Cycle
+ *     P_OFF[<b>Turn Off Sensor</b><br>Send Mode IDLE]
+ *     P_OFF --> P_HOST_SLEEP[<b>Host Sleep</b><br>Wait for Interval OR Signal]
+ *     P_HOST_SLEEP --> P_WAKE_CHECK{Woke by Signal?}
+ *     P_WAKE_CHECK -- Yes (User Input) --> WAIT
+ *     P_WAKE_CHECK -- No (Timer Expired) --> P_WAKE
+ * 
+ * Implementation Notes:
+ * - Add enum for operation modes: STANDBY, CONTINUOUS, PERIODIC_30S, PERIODIC_1M, PERIODIC_5M, PERIODIC_10M
+ * - Add mode selection via sensor attribute or shell command
+ * - Implement sensor deep sleep command (set mode to IDLE)
+ * - Add wake-up via MFIO pulse (300us low pulse)
+ * - Implement timeout mechanism for periodic measurements (30s default)
+ * - Add data save/send callback for periodic measurements
+ * - Use k_timer for periodic intervals and measurement timeouts
+ */
 
 /* Device Tree Reference */
 #define MAX32664C_NODE DT_NODELABEL(max32664c)
@@ -87,6 +148,7 @@ void sensor_app_thread_entry(void *p1, void *p2, void *p3)
     int finger_missing_counter = 0;  /* For exiting SpO2 (Debounce) */
     int stabilization_grace_period = 0; /* Startup grace period */
     int cooldown_timer = 0;
+    int64_t probing_start_ms = 0;    /* Timeout tracker for PROBING state */
 
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
 
@@ -107,6 +169,7 @@ void sensor_app_thread_entry(void *p1, void *p2, void *p3)
         if (ret == 0) {
             LOG_INF("Mode Set Success! Starting Loop.");
             current_state = STATE_B_PROBING;
+            probing_start_ms = k_uptime_get();
             break;
         }
         LOG_WRN("Waiting for sensor response... (err %d)", ret);
@@ -135,16 +198,29 @@ void sensor_app_thread_entry(void *p1, void *p2, void *p3)
 
         /* --- STATE B: PROBING (Green LED) --- */
         case STATE_B_PROBING:
-            /* In this mode, we just look for skin contact */
+        {
+            /* If finger detected, proceed normally */
             if (skin.val1 == 3) { /* 3 = ON_SKIN */
                 LOG_INF(">>> FINGER DETECTED! Transition to STABILIZING");
                 current_state = STATE_C_STABILIZING;
                 confidence_counter = 0;
-            } else {
-                /* Debug log occasionally */
-                /* LOG_DBG("Probing... SCD:%d", skin.val1); */
-                k_msleep(100); 
+                break;
             }
+
+            /* No finger: if PROBING > 5min, power off */
+            int64_t elapsed = k_uptime_get() - probing_start_ms;
+            if (elapsed >= 300000) {
+                LOG_WRN("No finger for 5 Minutes. Requesting PMIC SOFTWARE OFF (wake via CHGIN).");
+
+                /* Request PMIC shutdown (PMIC thread will execute it safely) */
+                max77658_request_software_off("SCD no-contact 5min");
+
+                /* After requesting shutdown, just idle (PMIC will cut power soon) */
+                while (1) { k_msleep(1000); }
+            }
+
+            k_msleep(100);
+        }
             break;
 
         /* --- STATE C: STABILIZING (Green LED - Waiting for Signal Lock) --- */
@@ -155,6 +231,7 @@ void sensor_app_thread_entry(void *p1, void *p2, void *p3)
                 /* If finger removed immediately, go back to probing */
                 LOG_WRN("<<< LOST SKIN (Immediate). Back to PROBING.");
                 current_state = STATE_B_PROBING;
+                probing_start_ms = k_uptime_get();
                 confidence_counter = 0;
             } 
             else if (hr.val2 >= STABLE_CONFIDENCE_THR) {
@@ -243,12 +320,14 @@ void sensor_app_thread_entry(void *p1, void *p2, void *p3)
             if (cooldown_timer > 50) {
                 LOG_INF(">>> COOLDOWN COMPLETE. Returning to PROBING.");
                 current_state = STATE_B_PROBING;
+                probing_start_ms = k_uptime_get();
             }
             k_msleep(40);
             break;
             
         case STATE_A_IDLE:
              current_state = STATE_B_PROBING;
+             probing_start_ms = k_uptime_get();
              break;
         }
     }

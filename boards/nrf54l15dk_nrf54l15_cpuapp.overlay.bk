@@ -117,6 +117,11 @@
     pinctrl-names = "default", "sleep";
 };
 
+/* Disable NFC to allow P1.02 and P1.03 to be used as UART pins */
+&nfct {
+    status = "disabled";
+};
+
 /* GPIO definitions for MAX32664C and PMIC control */
 / {
     /* MAX32664C control pins */

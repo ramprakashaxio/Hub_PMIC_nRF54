@@ -3,9 +3,11 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * GPIO Pin Configuration:
- *   P1.13 - PMIC_nRST: Active LOW hardware reset output
- *   P0.30 - PMIC_nIRQ: Active LOW interrupt input with pull-up
+ * GPIO Pin Configuration (P1.xx):
+ *   P1.07 - nEN:   Open-drain wake control (drive LOW or Hi-Z)
+ *   P1.06 - nIRQ:  PMIC interrupt output (input with pull-up)
+ *   P1.05 - nRST:  PMIC reset output (input, monitor only)
+ *   P1.04 - AMUX:  Analog multiplexer output (input for ADC)
  */
 
 #include "pmic_gpio.h"
@@ -14,211 +16,187 @@
 
 LOG_MODULE_REGISTER(pmic_gpio, CONFIG_LOG_DEFAULT_LEVEL);
 
-/*
- * GPIO Pin Definitions from Devicetree
- *
- * nRST: P1.13 - Output, Active LOW, default HIGH (deasserted)
- * nIRQ: P0.30 - Input, Active LOW, Pull-up enabled
- */
-#define PMIC_NRST_NODE  DT_ALIAS(pmic_rst)
-#define PMIC_NIRQ_NODE  DT_ALIAS(pmic_irq)
+#define PMIC_PORT_NODE   DT_NODELABEL(gpio1)
 
-#if DT_NODE_EXISTS(PMIC_NRST_NODE)
-static const struct gpio_dt_spec pmic_nrst = GPIO_DT_SPEC_GET(PMIC_NRST_NODE, gpios);
-#define PMIC_NRST_AVAILABLE 1
-#else
-#define PMIC_NRST_AVAILABLE 0
-#warning "PMIC nRST pin not defined in devicetree"
-#endif
+#define PIN_NEN   7  // P1.07
+#define PIN_NIRQ  6  // P1.06
+#define PIN_NRST  5  // P1.05
+#define PIN_AMUX  4  // P1.04
 
-#if DT_NODE_EXISTS(PMIC_NIRQ_NODE)
-static const struct gpio_dt_spec pmic_nirq = GPIO_DT_SPEC_GET(PMIC_NIRQ_NODE, gpios);
-#define PMIC_NIRQ_AVAILABLE 1
-#else
-#define PMIC_NIRQ_AVAILABLE 0
-#warning "PMIC nIRQ pin not defined in devicetree"
-#endif
+static const struct device *gpio1;
 
-/* Interrupt callback storage */
-static struct gpio_callback nirq_cb_data;
-static pmic_irq_callback_t user_callback = NULL;
-static void *user_callback_data = NULL;
+static struct gpio_callback irq_cb;
+static void (*user_irq_cb)(void *user_data);
+static void *user_irq_ud;
 
 /*
  * Internal GPIO interrupt handler
  */
-#if PMIC_NIRQ_AVAILABLE
-static void nirq_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+static void irq_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
     ARG_UNUSED(dev);
     ARG_UNUSED(cb);
     ARG_UNUSED(pins);
-
-    LOG_DBG("PMIC IRQ triggered");
-
-    if (user_callback != NULL) {
-        user_callback(user_callback_data);
+    
+    if (user_irq_cb) {
+        user_irq_cb(user_irq_ud);
     }
 }
-#endif
 
 int pmic_gpio_init(void)
 {
-    int ret;
-
-    LOG_INF("Initializing PMIC GPIO pins");
-
-#if PMIC_NRST_AVAILABLE
-    /* Configure nRST as output, initially HIGH (deasserted) */
-    if (!gpio_is_ready_dt(&pmic_nrst)) {
-        LOG_ERR("nRST GPIO device not ready");
+    gpio1 = DEVICE_DT_GET(PMIC_PORT_NODE);
+    if (!device_is_ready(gpio1)) {
+        LOG_ERR("gpio1 not ready");
         return -ENODEV;
     }
 
-    ret = gpio_pin_configure_dt(&pmic_nrst, GPIO_OUTPUT_HIGH);
-    if (ret < 0) {
-        LOG_ERR("Failed to configure nRST pin: %d", ret);
-        return ret;
-    }
+    /* nEN: Start RELEASED as true Hi-Z (no internal pull-up) */
+    gpio_pin_configure(gpio1, PIN_NEN, GPIO_INPUT);
+    LOG_INF("  nEN: P1.%02d configured (Hi-Z, released, no-pull)", PIN_NEN);
 
-    LOG_INF("  nRST: P%d.%02d configured (output, deasserted)",
-            pmic_nrst.port == DEVICE_DT_GET(DT_NODELABEL(gpio0)) ? 0 : 1,
-            pmic_nrst.pin);
-#else
-    LOG_WRN("  nRST: Not available");
-#endif
+    /* nRST: PMIC output -> Monitor as INPUT (external pull-up present) */
+    gpio_pin_configure(gpio1, PIN_NRST, GPIO_INPUT);
+    LOG_INF("  nRST: P1.%02d configured (input, monitor)", PIN_NRST);
 
-#if PMIC_NIRQ_AVAILABLE
-    /* Configure nIRQ as input with pull-up */
-    if (!gpio_is_ready_dt(&pmic_nirq)) {
-        LOG_ERR("nIRQ GPIO device not ready");
-        return -ENODEV;
-    }
+    /* nIRQ: PMIC output open-drain -> INPUT + interrupt
+     * Internal pull-up enabled for robustness (backup to external pull-up) */
+    gpio_pin_configure(gpio1, PIN_NIRQ, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_interrupt_configure(gpio1, PIN_NIRQ, GPIO_INT_EDGE_FALLING);
+    
+    gpio_init_callback(&irq_cb, irq_isr, BIT(PIN_NIRQ));
+    gpio_add_callback(gpio1, &irq_cb);
+    LOG_INF("  nIRQ: P1.%02d configured (input, interrupt enabled)", PIN_NIRQ);
 
-    ret = gpio_pin_configure_dt(&pmic_nirq, GPIO_INPUT | GPIO_PULL_UP);
-    if (ret < 0) {
-        LOG_ERR("Failed to configure nIRQ pin: %d", ret);
-        return ret;
-    }
-
-    LOG_INF("  nIRQ: P%d.%02d configured (input, pull-up)",
-            pmic_nirq.port == DEVICE_DT_GET(DT_NODELABEL(gpio0)) ? 0 : 1,
-            pmic_nirq.pin);
-#else
-    LOG_WRN("  nIRQ: Not available");
-#endif
+    /* AMUX_OUT: Input for ADC reading */
+    gpio_pin_configure(gpio1, PIN_AMUX, GPIO_INPUT);
+    LOG_INF("  AMUX: P1.%02d configured (input, ADC)", PIN_AMUX);
 
     LOG_INF("PMIC GPIO initialization complete");
     return 0;
 }
 
-void pmic_reset_assert(void)
+void pmic_irq_register_callback(void (*cb)(void *), void *user_data)
 {
-#if PMIC_NRST_AVAILABLE
-    /* Set pin LOW (active) - PMIC enters reset */
-    gpio_pin_set_dt(&pmic_nrst, 1);  /* 1 = active (LOW due to GPIO_ACTIVE_LOW) */
-    LOG_INF("PMIC reset ASSERTED (nRST=LOW)");
-#else
-    LOG_WRN("pmic_reset_assert: nRST pin not available");
-#endif
-}
-
-void pmic_reset_deassert(void)
-{
-#if PMIC_NRST_AVAILABLE
-    /* Set pin HIGH (inactive) - PMIC starts operating */
-    gpio_pin_set_dt(&pmic_nrst, 0);  /* 0 = inactive (HIGH due to GPIO_ACTIVE_LOW) */
-    LOG_INF("PMIC reset DEASSERTED (nRST=HIGH)");
-#else
-    LOG_WRN("pmic_reset_deassert: nRST pin not available");
-#endif
-}
-
-void pmic_hardware_reset(uint32_t reset_time_ms, uint32_t startup_time_ms)
-{
-    LOG_INF("Performing PMIC hardware reset sequence");
-    LOG_INF("  Reset hold time: %u ms", reset_time_ms);
-    LOG_INF("  Startup wait time: %u ms", startup_time_ms);
-
-    /* Step 1: Assert reset */
-    pmic_reset_assert();
-
-    /* Step 2: Wait for reset to take effect */
-    k_msleep(reset_time_ms);
-
-    /* Step 3: Release reset */
-    pmic_reset_deassert();
-
-    /* Step 4: Wait for PMIC to start up */
-    k_msleep(startup_time_ms);
-
-    LOG_INF("PMIC hardware reset complete");
-}
-
-bool pmic_irq_is_active(void)
-{
-#if PMIC_NIRQ_AVAILABLE
-    /* Returns 1 if active (pin is LOW), 0 if inactive (pin is HIGH) */
-    int val = gpio_pin_get_dt(&pmic_nirq);
-    return (val == 1);  /* 1 = active due to GPIO_ACTIVE_LOW */
-#else
-    return false;
-#endif
-}
-
-int pmic_irq_register_callback(pmic_irq_callback_t callback, void *user_data)
-{
-#if PMIC_NIRQ_AVAILABLE
-    int ret;
-
-    user_callback = callback;
-    user_callback_data = user_data;
-
-    if (callback == NULL) {
-        /* Disable and remove callback */
-        pmic_irq_disable();
-        gpio_remove_callback(pmic_nirq.port, &nirq_cb_data);
-        LOG_INF("PMIC IRQ callback removed");
-        return 0;
-    }
-
-    /* Configure interrupt for falling edge (HIGH to LOW transition) */
-    ret = gpio_pin_interrupt_configure_dt(&pmic_nirq, GPIO_INT_EDGE_TO_ACTIVE);
-    if (ret < 0) {
-        LOG_ERR("Failed to configure nIRQ interrupt: %d", ret);
-        return ret;
-    }
-
-    /* Initialize callback structure */
-    gpio_init_callback(&nirq_cb_data, nirq_isr, BIT(pmic_nirq.pin));
-
-    /* Add callback */
-    ret = gpio_add_callback(pmic_nirq.port, &nirq_cb_data);
-    if (ret < 0) {
-        LOG_ERR("Failed to add nIRQ callback: %d", ret);
-        return ret;
-    }
-
+    user_irq_cb = cb;
+    user_irq_ud = user_data;
     LOG_INF("PMIC IRQ callback registered");
-    return 0;
-#else
-    LOG_WRN("pmic_irq_register_callback: nIRQ pin not available");
-    return -ENOTSUP;
-#endif
 }
 
 void pmic_irq_enable(void)
 {
-#if PMIC_NIRQ_AVAILABLE
-    gpio_pin_interrupt_configure_dt(&pmic_nirq, GPIO_INT_EDGE_TO_ACTIVE);
+    /* Already configured as edge falling; nothing else needed */
     LOG_DBG("PMIC IRQ enabled");
-#endif
 }
 
 void pmic_irq_disable(void)
 {
-#if PMIC_NIRQ_AVAILABLE
-    gpio_pin_interrupt_configure_dt(&pmic_nirq, GPIO_INT_DISABLE);
+    gpio_pin_interrupt_configure(gpio1, PIN_NIRQ, GPIO_INT_DISABLE);
     LOG_DBG("PMIC IRQ disabled");
-#endif
+}
+
+bool pmic_irq_is_active(void)
+{
+    int val = gpio_pin_get(gpio1, PIN_NIRQ);
+    return (val == 0);  /* Active LOW */
+}
+
+/* ============================================================================
+ * Open-Drain nEN Control (Wake PMIC from Ship Mode)
+ * ============================================================================ */
+
+static inline void pmic_nen_drive_low(void)
+{
+    gpio_pin_configure(gpio1, PIN_NEN, GPIO_OUTPUT_LOW);
+}
+
+void pmic_nen_release_hiz(void)
+{
+    /* True Hi-Z: input, no pull (external pull-up only if present) */
+    gpio_pin_configure(gpio1, PIN_NEN, GPIO_INPUT);
+}
+
+void pmic_nen_pulse_ms(uint32_t ms)
+{
+    LOG_INF("nEN pulse: %u ms", ms);
+    pmic_nen_drive_low();
+    k_msleep(ms);
+    pmic_nen_release_hiz();
+}
+
+/* ============================================================================
+ * nRST Monitoring (PMIC drives this pin)
+ * ============================================================================ */
+
+bool pmic_is_nrst_high(void)
+{
+    int v = gpio_pin_get(gpio1, PIN_NRST);
+    return (v > 0);
+}
+
+int pmic_wait_nrst_high(uint32_t timeout_ms)
+{
+    uint32_t t0 = k_uptime_get_32();
+    while ((k_uptime_get_32() - t0) < timeout_ms) {
+        if (pmic_is_nrst_high()) {
+            LOG_INF("nRST went HIGH after %u ms", k_uptime_get_32() - t0);
+            return 0;
+        }
+        k_msleep(2);
+    }
+    LOG_ERR("nRST timeout after %u ms", timeout_ms);
+    return -ETIMEDOUT;
+}
+
+/* ============================================================================
+ * Raw GPIO Pin Access
+ * ============================================================================ */
+
+int pmic_gpio_get_nen(void)
+{
+    if (!gpio1) return -ENODEV;
+    return gpio_pin_get(gpio1, PIN_NEN);
+}
+
+int pmic_gpio_get_nrst(void)
+{
+    if (!gpio1) return -ENODEV;
+    return gpio_pin_get(gpio1, PIN_NRST);
+}
+
+int pmic_gpio_get_nirq(void)
+{
+    if (!gpio1) return -ENODEV;
+    return gpio_pin_get(gpio1, PIN_NIRQ);
+}
+
+/* ============================================================================
+ * Legacy Functions (Deprecated - nRST is now PMIC output)
+ * ============================================================================ */
+
+void pmic_reset_assert(void)
+{
+    LOG_WRN("pmic_reset_assert: Deprecated - nRST is PMIC output, cannot drive");
+}
+
+void pmic_reset_deassert(void)
+{
+    LOG_WRN("pmic_reset_deassert: Deprecated - nRST is PMIC output, cannot drive");
+}
+
+void pmic_hardware_reset(uint32_t reset_time_ms, uint32_t startup_time_ms)
+{
+    LOG_WRN("pmic_hardware_reset: Deprecated - Use nEN pulse instead");
+    LOG_INF("Performing nEN pulse wake sequence");
+    
+    /* Drive nEN low for reset duration */
+    pmic_nen_pulse_ms(reset_time_ms);
+    
+    /* Wait for PMIC to start up and drive nRST high */
+    LOG_INF("Waiting for nRST to go HIGH...");
+    if (pmic_wait_nrst_high(startup_time_ms) == 0) {
+        LOG_INF("PMIC wake complete");
+    } else {
+        LOG_ERR("PMIC failed to wake (nRST timeout)");
+    }
 }

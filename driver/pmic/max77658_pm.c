@@ -1235,6 +1235,27 @@ int32_t max77658_pm_set_DBEN_nEN(max77658_pm_t *ctx, uint8_t target_val)
     return ret;
 }
 
+/**
+  * @brief  Set SFT_CTRL without readback verification
+  * @note   Use this for SFT_OFF (0x02) to avoid I2C hang when rails are cut
+  * @param  ctx: pointer to max77658_pm context
+  * @param  target_val: value to write (0-3)
+  * @retval SUCCESS or ERROR
+  */
+int32_t max77658_pm_set_SFT_CTRL_novfy(max77658_pm_t *ctx, uint8_t target_val)
+{
+    int32_t ret;
+    uint8_t curr;
+    uint8_t wr;
+
+    ret = max77658_pm_read_reg(ctx, MAX77658_CNFG_GLBL, &curr);
+    if (ret < 0) return ret;
+
+    wr = (uint8_t)((curr & 0xFCu) | (target_val & 0x03u));
+    ret = max77658_pm_write_reg(ctx, MAX77658_CNFG_GLBL, &wr);
+    return ret; // NO read-back verification
+}
+
 int32_t max77658_pm_set_SFT_CTRL(max77658_pm_t *ctx, uint8_t target_val)
 {
     int32_t ret;
@@ -1998,11 +2019,29 @@ int32_t max77658_pm_set_EN_SBB2(max77658_pm_t *ctx, uint8_t target_val)
 int32_t max77658_pm_set_TV_SBB0_DVS(max77658_pm_t *ctx, uint8_t target_val)
 {
     int32_t ret;
-    uint8_t write_data[1];
-    write_data[0] = target_val;
-    ret = max77658_pm_write_reg(ctx, MAX77658_CNFG_DVS_SBB0_A, write_data);
-    ret = (max77658_pm_get_TV_SBB0_DVS(ctx) == target_val)?SUCCESS:ERROR;
-    return ret;
+    uint8_t write_data;
+
+    /* Mask to valid 7-bit TV range */
+    write_data = target_val & 0x7F;
+
+    /* 1. Perform Write */
+    ret = max77658_pm_write_reg(ctx, MAX77658_CNFG_DVS_SBB0_A, &write_data);
+    if (ret < 0) {
+        return ret; // Return I2C write error immediately
+    }
+
+    /* 2. Verify Write (Read Back) */
+    ret = max77658_pm_get_TV_SBB0_DVS(ctx);
+    if (ret < 0) {
+        return ret; // Return I2C read error
+    }
+
+    /* 3. Logic Check */
+    if ((uint8_t)ret != write_data) {
+        return -1; // ERROR: Data mismatch
+    }
+
+    return 0; // SUCCESS
 }
 
 int32_t max77658_pm_set_TV_OFS_LDO0(max77658_pm_t *ctx, uint8_t target_val)

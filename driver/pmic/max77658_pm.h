@@ -25,6 +25,8 @@
 #define MAX77658_PM_I2C_port 2     //I2C port of the host µC
 #endif
 
+/* Register Addresses - See max77658_defines.h for register definitions */
+
 /* Public enumerate/structure ----------------------------------------- */
 
 /** @addtogroup  Interfaces_Functions
@@ -1372,6 +1374,12 @@ int32_t max77658_pm_set_DBEN_nEN(max77658_pm_t *ctx, uint8_t target_val);
  * @brief  Software Reset Functions.[set]
  */
 int32_t max77658_pm_set_SFT_CTRL(max77658_pm_t *ctx, uint8_t target_val);
+
+/**
+ * @brief  Set SFT_CTRL without readback verification (safe for SFT_OFF)
+ * @note   Use this for SFT_OFF (0x02) to avoid I2C hang when rails are cut
+ */
+int32_t max77658_pm_set_SFT_CTRL_novfy(max77658_pm_t *ctx, uint8_t target_val);
 
 /**
  * @brief  Software Reset Functions.[set]

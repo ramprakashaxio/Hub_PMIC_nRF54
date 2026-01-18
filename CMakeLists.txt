@@ -3,12 +3,15 @@
 cmake_minimum_required(VERSION 3.20.0)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(pmic_2512)
+project(pmic_2512_nrf54)
 
 # Application sources
 target_sources(app PRIVATE 
     src/main.c
     src/pmic_gpio.c
+    src/data_manager.c
+    src/storage_manager.c
+    src/ble_app.c
     lib/max77658_main.c
     lib/max32664c_main.c
     lib/comman/app_i2c_lock.c
